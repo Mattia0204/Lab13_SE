@@ -1,117 +1,126 @@
 import networkx as nx
 from database.dao import DAO
 
-
 class Model:
     def __init__(self):
-        self.peso_min = -1
-        self.peso_max = -1
-        self.minori = 0
-        self.maggiori = 0
-        self.lista_archi = []
-        self.lista_duplicati = []
-        self.G = nx.Graph()
+        self.G = nx.DiGraph()
+        self._nodes = []
+        self._edges = []
 
-    def build_weighted_graph(self):  # costruisce il grafo pesato e orientato
-        self.G = nx.Graph()
-        dict_interazione = DAO.get_interazione()
-        dict_gene = DAO.get_gene()
-        for interazione in dict_interazione.values():
-            cromosoma1 = 0
-            cromosoma2 = 0
-            peso = float(interazione.correlazione)
-            for gene in dict_gene.values():
-                if gene.id == interazione.id_gene1:
-                    cromosoma1 = gene.cromosoma
-                if gene.id == interazione.id_gene2:
-                    cromosoma2 = gene.cromosoma
-                if cromosoma1 != cromosoma2:
-                    if (cromosoma1, cromosoma2) not in self.G:
-                        self.G.add_edge(cromosoma1, cromosoma2, peso=peso)
-                    else:
-                        peso_estratto=float(self.G[cromosoma1][cromosoma2]['peso'])
-                        peso = peso + peso_estratto
-                        self.G.remove_edge(cromosoma1, cromosoma2)
-                        self.G.add_edge(cromosoma1, cromosoma2, peso=peso)
+        self.id_map = {}
+        self.soluzione_best = []
 
-        return self.G
+        self._lista_cromosomi = []
+        self._lista_geni = []
+        self._lista_geni_connessi = []
 
-    def get_edges_weight_min_max(self):  # restituisce peso minimo e massimo degli archi
-        pesi = [data["peso"] for _, _, data in self.G.edges(data=True)]  # lista dei pesi degli archi
-        for peso in pesi:
-            peso = float(peso)
-            if self.peso_min == -1:
-                self.peso_min = peso
-            if self.peso_max == -1:
-                self.peso_max = peso
-            if self.peso_max < peso:
-                self.peso_max = peso
-            if self.peso_min > peso:
-                self.peso_min = peso
-        return self.peso_min, self.peso_max
+        self.load_geni()
+        self.load_cromosomi()
+        self.load_geni_connessi()
 
-    def count_edges_by_threshold(self, soglia):  # conta archi minori e maggiori della soglia
-        pesi = [data["peso"] for _, _, data in self.G.edges(data=True)]  # lista dei pesi degli archi
-        for peso in pesi:
-            peso = float(peso)
-            if peso < soglia:
-                self.minori += 1  # incrementa il contatore minori
-            elif peso > soglia:
-                self.maggiori += 1  # incrementa il contatore maggiori
-        return self.minori, self.maggiori
-    """
-    def nodi_consecutivi(self):  # costruisce dizionario dei vicini diretti dal DB
-        dic_nodi = {}
-        dict_rifugi = DAO.get_rifugio()
-        for rifugio in dict_rifugi.values():
-            dic_nodi[rifugio.nome] = []
-        dict_connessioni = DAO.get_connessione()
-        for connessione in dict_connessioni.values():
-            rifugio1 = ""
-            rifugio2 = ""
-            id1 = connessione.id_rifugio1
-            id2 = connessione.id_rifugio2
-            for rifugio in dict_rifugi.values():  # cerca i nomi corrispondenti agli id
-                if rifugio.id == id1:
-                    rifugio1 = rifugio.nome
-                if rifugio.id == id2:
-                    rifugio2 = rifugio.nome
-            if rifugio1 and rifugio2:  # se entrambi i nomi sono presenti
-                dic_nodi[rifugio1].append(rifugio2)
-                dic_nodi[rifugio2].append(rifugio1)
-        return dic_nodi
+    def load_cromosomi(self):
+        self._lista_cromosomi = DAO.get_cromosomi()
 
-    def cerca_cammino_minimo(self, soglia):  # ricerca cammino minimo con Dijkstra e filtri
-        soglia = float(soglia)
-        cammini_validi = []
-        G_soglia = nx.Graph()  # sotto-grafo che conterrà solo archi con peso > soglia
-        for u, v, data in self.G.edges(data=True):
-            if data["peso"] > soglia:
-                G_soglia.add_edge(u, v, peso=data["peso"])
-        for nodo_inizio in G_soglia.nodes:
-            lengths, paths = nx.single_source_dijkstra(G_soglia, source=nodo_inizio, weight="peso")  # Dijkstra da nodo_inizio
-            for nodo_fine, peso_totale in lengths.items():  # per ogni nodo raggiungibile prendo lunghezze e percorsi
-                path = paths[nodo_fine]
-                if len(path) >= 3:  # controllo che il percorso abbia almeno 3 nodi (2 archi)
-                    coppia = tuple(
-                        sorted([path[0], path[-1]]))  # normalizza coppia estremi per evitare duplicati inversi
-                    cammini_validi.append((coppia[0], coppia[1], path, peso_totale))
-        unici = set()
-        cammini_unici = []
-        for c in cammini_validi:  # rimuove duplicati approssimativi basati su estremi e peso
-            key = (c[0], c[1], round(c[3], 6))
-            if key not in unici:
-                unici.add(key)
-                cammini_unici.append(c)
-        if not cammini_unici:
-            return []
-        min_peso = min(cammini_unici, key=lambda x: x[3])[3]  # trova il peso minimo tra i cammini unici
-        cammini_minimi = [c for c in cammini_unici if c[3] == min_peso]  # filtra solo i cammini con peso minimo
-        percorsi_finali = []
-        for start, end, path, _ in cammini_minimi:
-            for i in range(len(path) - 1):
-                u, v = path[i], path[i + 1]
-                peso_arco = G_soglia[u][v]['peso']
-                percorsi_finali.append((u, v, peso_arco))
-        return percorsi_finali
-    """
+    def load_geni(self):
+        self._lista_geni = DAO.get_geni()
+        self.id_map = {}
+        for g in self._lista_geni:
+            self.id_map[g.id] = g.cromosoma
+
+    def load_geni_connessi(self):
+        self._lista_geni_connessi = DAO.get_geni_connessi()
+
+    def build_graph(self):
+        self.G.clear()
+
+        self._nodes = []
+        self._edges = []
+
+        for c in self._lista_cromosomi:
+            self._nodes.append(c)
+        self.G.add_nodes_from(self._nodes)
+
+        edges = {}
+        for g1, g2, corr in self._lista_geni_connessi:
+            if (self.id_map[g1], self.id_map[g2]) not in edges:
+                edges[(self.id_map[g1], self.id_map[g2])] = float(corr)
+            else:
+                edges[(self.id_map[g1], self.id_map[g2])] += float(corr)
+        for k, v in edges.items():
+            self._edges.append((k[0], k[1], v))
+        self.G.add_weighted_edges_from(self._edges)
+
+    def ricerca_cammino(self, t):
+        self.soluzione_best.clear()
+
+        for n in self.get_nodes():
+            partial = []
+            partial_edges = []
+
+            partial.append(n)
+            self.ricorsione(partial, partial_edges, t)
+
+        print("final", len(self.soluzione_best), [i[2]["weight"] for i in self.soluzione_best])
+
+    def ricorsione(self, partial_nodes, partial_edges, t):
+        n_last = partial_nodes[-1]
+        neigh = self._get_admissible_neighbors(n_last, partial_edges, t)
+
+        # stop
+        if len(neigh) == 0:
+            weight_path = self.compute_weight_path(partial_edges)
+            weight_path_best = self.compute_weight_path(self.soluzione_best)
+            if weight_path > weight_path_best:
+                self.soluzione_best = partial_edges[:]
+            return
+
+        for n in neigh:
+            print("...")
+            partial_nodes.append(n)
+            partial_edges.append((n_last, n, self.G.get_edge_data(n_last, n)))
+            self.ricorsione(partial_nodes, partial_edges, t)
+            partial_nodes.pop()
+            partial_edges.pop()
+
+    def _get_admissible_neighbors(self, node, partial_edges, soglia):
+        result = []
+        for u, v, data in self.G.out_edges(node, data=True):
+            if data["weight"] > soglia:
+                # controllo SOLO l'arco diretto
+                if (u, v) not in [(x[0], x[1]) for x in partial_edges]:
+                    result.append(v)
+        return result
+
+    def compute_weight_path(self, mylist):
+        weight = 0
+        for e in mylist:
+            weight += e[2]['weight']
+        return weight
+
+    def count_edges(self, t):
+        count_bigger = 0
+        count_smaller = 0
+        for x in self.get_edges():
+            if x[2]['weight'] > t:
+                count_bigger += 1
+            elif x[2]['weight'] < t:
+                count_smaller += 1
+        return count_bigger, count_smaller
+
+    def get_nodes(self):
+        return self.G.nodes()
+
+    def get_edges(self):
+        return list(self.G.edges(data=True))
+
+    def get_num_of_nodes(self):
+        return self.G.number_of_nodes()
+
+    def get_num_of_edges(self):
+        return self.G.number_of_edges()
+
+    def get_min_weight(self):
+        return min([x[2]['weight'] for x in self.get_edges()])
+
+    def get_max_weight(self):
+        return max([x[2]['weight'] for x in self.get_edges()])

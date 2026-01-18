@@ -7,11 +7,11 @@ class Gene:
     essenziale: str
     cromosoma: int
 
-    def __eq__(self, other):
-        return isinstance(other, Gene) and self.id == other.id
-
     def __str__(self):
-        return f"{self.id}"
+        return self.id
 
     def __repr__(self):
-        return f"{self.id}"
+        return self.id
+
+    def __hash__(self):
+        return hash(self.id)
